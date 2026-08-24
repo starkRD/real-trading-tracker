@@ -37,9 +37,17 @@ function findHeaderIndex(rows: unknown[][], required: string[]) {
   });
 }
 
+function findAnyHeaderIndex(rows: unknown[][], candidates: string[]) {
+  for (const candidate of candidates) {
+    const index = findHeaderIndex(rows, [candidate]);
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
 function sheetRows(rows: unknown[][]) {
   if (!rows.length) return [] as Record<string, unknown>[];
-  const headerIndex = findHeaderIndex(rows, ["Ticker"]);
+  const headerIndex = findAnyHeaderIndex(rows, ["Ticker", "Trade Name", "Symbol", "Stock", "Scrip", "Company"]);
   if (headerIndex < 0) return [];
   const header = rows[headerIndex];
   return rows.slice(headerIndex + 1)
@@ -52,11 +60,11 @@ async function readFile(file: File): Promise<Record<string, unknown>[]> {
 
   if (lower.endsWith(".csv")) {
     const raw = await file.text();
-    const parsed = Papa.parse<unknown[]>(raw, {
+    const parsed = Papa.parse(raw, {
       header: false,
       skipEmptyLines: true,
       encoding: "UTF-8"
-    });
+    } as Papa.ParseConfig<unknown[]>) as Papa.ParseResult<unknown[]>;
     return sheetRows(parsed.data);
   }
 
@@ -122,20 +130,24 @@ export default function Import() {
       const rows = await readFile(file);
       const incoming: ModelTrade[] = rows.map((r, i) => ({
         id: `m-${Date.now()}-${i}`,
-        ticker: text(get(r, ["Ticker", "Trade Name", "Symbol"])),
-        date: text(get(r, ["Date", "Trade Date"])),
-        buy: num(get(r, ["Buy Price", "Buy"])),
-        target: num(get(r, ["Target"])),
-        stop: num(get(r, ["Stoploss", "Stop Loss", "Stop"])),
-        positionPct: num(get(r, ["Position %", "Position", "Position Percent"])),
-        exit: num(get(r, ["Model Exit", "Exit", "Exit Price"])),
-        bookedPct: num(get(r, ["Booked PF", "Model PF", "Booked"])),
-        status: text(get(r, ["Trade Status", "Status"])) || "booked",
-        notes: text(get(r, ["Remarks", "Notes"]))
+        ticker: text(get(r, ["Ticker", "Trade Name", "Symbol", "Stock", "Scrip", "Company"])),
+        date: text(get(r, ["Date", "Trade Date", "Entry Date"])),
+        buy: num(get(r, ["Buy Price", "Buy", "Buy Range", "Entry", "Entry Price"])),
+        target: num(get(r, ["Target", "Target Price", "TGT"])),
+        stop: num(get(r, ["Stoploss", "Stop Loss", "Stop", "SL", "Stoploss Price"])),
+        positionPct: num(get(r, ["Position %", "Position", "Position Percent", "Allocation %", "Weight %"])),
+        exit: num(get(r, ["Model Exit", "Exit", "Exit Price", "Sold At", "Sell Price"])),
+        bookedPct: num(get(r, ["Booked PF", "Model PF", "Booked", "Booked %", "PF Booked"])),
+        status: text(get(r, ["Trade Status", "Status", "Action", "Result"])) || "booked",
+        notes: text(get(r, ["Remarks", "Notes", "Remark", "Comments"]))
       })).filter(t => t.ticker);
 
-      saveModels([...models(), ...incoming]);
-      setMsg(`Imported ${incoming.length} 7Bar model trades.`);
+      if (!incoming.length) {
+        setMsg(`0 imported. The file was read, but no trade rows were recognised. Check that the sheet contains a ticker/stock column. Detected ${rows.length} data rows.`);
+      } else {
+        saveModels([...models(), ...incoming]);
+        setMsg(`Imported ${incoming.length} 7Bar model trades.`);
+      }
     } catch (e) {
       setMsg(`Import failed: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
