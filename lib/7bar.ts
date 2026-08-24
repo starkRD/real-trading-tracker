@@ -22,7 +22,7 @@ export function parseGviz(json:any):BarModel[]{
   const result:BarModel[]=[];
   // Current 7Bar sheet layout: Active table first, Closed table later.
   const activeHeader=findHeader(rows,["Ticker","Status","CMP","Buy Price","Target","Stoploss","Position %","Trade Status"]);
-  const closedHeader=rows.findIndex((r,i)=>i>activeHeader && norm(r[0]||"")==="closedtrades");
+  const closedHeader=rows.findIndex((r: string[], i: number)=>i>activeHeader && norm(r[0]||"")==="closedtrades");
   function parseSection(header:number, end:number){
     if(header<0)return;
     const h=rows[header].map(norm);
