@@ -4,7 +4,7 @@ export const pct=(n:number|null|undefined)=>`${((n||0)*100).toFixed(2)}%`;
 export function canonical(t:string, aliases:Record<string,string>={LTIM:'LTM'}){const u=t.trim().toUpperCase();return aliases[u]||u}
 export function applyTransactions(base:Position[], txs:Transaction[]):{positions:Position[];realized:number}{
  const map=new Map(base.map(p=>[canonical(p.ticker),{...p}])); let realized=0;
- for(const t of txs){const key=canonical(t.ticker);const p=map.get(key);
+ for(const t of txs){const key=canonical(t.ticker);let p=map.get(key);
   if(t.action==='BUY'){
    if(p){const total=p.invested+t.qty*t.price;const q=p.qty+t.qty;p={...p,qty:q,invested:total,avgBuy:q?total/q:p.avgBuy};map.set(key,p)}
    else map.set(key,{ticker:key,qty:t.qty,avgBuy:t.price,invested:t.qty*t.price,currentPrice:null,currentValue:null,running:null,runningPct:null,status:'Active',strategy:t.strategy});
