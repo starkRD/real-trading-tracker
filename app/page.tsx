@@ -5,7 +5,6 @@ import {ImportedState,Position,Transaction,BarTrade} from '../lib/types';
 import {applyTransactions,canonical,money,pct,summarize} from '../lib/calc';
 import {parseWorkbook} from '../lib/importTrades';
 import {parse7bar} from '../lib/parse7bar';
-import './globals.css';
 type Tab='Dashboard'|'Actual Trades'|'Import TRADES'|'Reconcile'|'Settings';
 const initial:ImportedState={startingCapital:300000,historicalBooked:0,historicalProfit:0,historicalLoss:0,activeInvestment:0,currentValue:0,activePositions:[],transactions:[],bookedInvestment:0,totalInvested:0,charges:0,importedAt:'',sourceName:''};
 export default function App(){const [tab,setTab]=useState<Tab>('Dashboard');const [state,setState]=useState(initial);const [bars,setBars]=useState<BarTrade[]>([]);const [barSummary,setBarSummary]=useState({bookedPct:null as number|null,runningPct:null as number|null});const [loading,setLoading]=useState(false);const [notice,setNotice]=useState('');const [modal,setModal]=useState(false);const [editing,setEditing]=useState<Transaction|null>(null);
