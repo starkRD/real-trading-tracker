@@ -1,0 +1,2 @@
+export type ModelTrade={id:string;ticker:string;date?:string;buy?:number;target?:number;stop?:number;positionPct?:number;exit?:number;bookedPct?:number;status?:string;notes?:string};
+export type ActualTrade={id:string;ticker:string;date?:string;qty:number;buy:number;sellQty1?:number;sell1?:number;sellQty2?:number;sell2?:number;status?:string;reason?:string;brokerage?:number;stt?:number;exchange?:number;sebi?:number;gst?:number;stamp?:number;dp?:number;other?:number};

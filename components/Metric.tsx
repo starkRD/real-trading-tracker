@@ -1,0 +1,1 @@
+export default function Metric({label,value,sub}:{label:string;value:string;sub?:string}){return <div className="card p-5"><div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div><div className="mt-2 text-2xl font-bold">{value}</div>{sub&&<div className="mt-1 text-xs text-zinc-500">{sub}</div>}</div>}
