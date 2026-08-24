@@ -1,12 +1,5 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-*{box-sizing:border-box}
-html,body{margin:0;padding:0;background:#09090b;color:#f4f4f5;font-family:Arial,Helvetica,sans-serif}
-body{min-height:100vh}
-button,input{font:inherit}
-.card{@apply rounded-2xl border border-zinc-800 bg-zinc-950/80}
-.btn{@apply rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold hover:bg-zinc-800}
-.btn-primary{@apply rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200}
-.label{@apply text-xs uppercase tracking-wider text-zinc-500}
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#08090b;color:#f4f4f5;font-family:Arial,Helvetica,sans-serif}body{min-height:100vh}button,input,select,textarea{font:inherit}
+@layer components{.card{@apply rounded-2xl border border-zinc-800 bg-zinc-950/80}.label{@apply text-[11px] uppercase tracking-[.14em] text-zinc-500}.muted{@apply text-zinc-500}.btn{@apply inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium hover:bg-zinc-800}.btn-primary{@apply inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200}.input{@apply w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm outline-none focus:border-zinc-400}.pill{@apply rounded-full border border-zinc-700 px-2.5 py-1 text-xs}}

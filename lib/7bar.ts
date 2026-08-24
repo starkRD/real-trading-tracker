@@ -1,45 +1,8 @@
-import {BarModel} from "./types";
-import {n,s} from "./utils";
-
-export const SHEET_ID="1uLyXG-BXWTjQ7secLVmQkSXduO8EaQIHT6GWQQ4Oe4g";
-export const SHEET_GID="2061682406";
-
-function rowValues(row:any):string[]{
-  return Array.isArray(row?.c) ? row.c.map((x:any)=>String(x?.v??"").trim()) : [];
-}
-function norm(x:string){return x.toLowerCase().replace(/[^a-z0-9%]/g,"")}
-function findHeader(rows:string[][], required:string[]):number{
-  const req=required.map(norm);
-  for(let i=0;i<Math.min(rows.length,60);i++){
-    const r=rows[i].map(norm);
-    const score=req.filter(x=>r.some(y=>y===x||y.includes(x))).length;
-    if(score>=Math.min(3,required.length)) return i;
-  }
-  return -1;
-}
-export function parseGviz(json:any):BarModel[]{
-  const rows=(json?.table?.rows||[]).map(rowValues);
-  const result:BarModel[]=[];
-  // Current 7Bar sheet layout: Active table first, Closed table later.
-  const activeHeader=findHeader(rows,["Ticker","Status","CMP","Buy Price","Target","Stoploss","Position %","Trade Status"]);
-  const closedHeader=rows.findIndex((r: string[], i: number)=>i>activeHeader && norm(r[0]||"")==="closedtrades");
-  function parseSection(header:number, end:number){
-    if(header<0)return;
-    const h=rows[header].map(norm);
-    const idx=(aliases:string[])=>aliases.map(a=>h.indexOf(norm(a))).find(i=>i>=0)??-1;
-    const ti=idx(["Ticker"]), si=idx(["Status"]), ci=idx(["CMP"]), bi=idx(["Buy Price"]), tar=idx(["Target"]),
-      sli=idx(["Stoploss","Stop Loss"]), pi=idx(["Position %"]), tsi=idx(["Trade Status"]),
-      bpi=idx(["Booked PF"]), ri=idx(["Running PF"]), ni=idx(["Remarks"]);
-    for(let i=header+1;i<(end<0?rows.length:end);i++){
-      const r=rows[i]; const ticker=s(r[ti]);
-      if(!ticker||["cash","index calculations","closed trades"].includes(norm(ticker)))continue;
-      if(ticker.toLowerCase().includes("alpha")||ticker.toLowerCase().includes("7bar booked"))continue;
-      result.push({ticker,status:s(r[si]),cmp:n(r[ci]),buyPrice:n(r[bi]),target:n(r[tar]),stopLoss:n(r[sli]),positionPct:n(r[pi]),tradeStatus:s(r[tsi]),bookedPf:n(r[bpi]),runningPf:n(r[ri]),remarks:s(r[ni])});
-    }
-  }
-  const ch=closedHeader>=0?findHeader(rows.slice(closedHeader+1),["Ticker","CMP","Buy Price","Position %","Trade Status"]):-1;
-  const actualClosedHeader=ch>=0?closedHeader+1+ch:-1;
-  parseSection(activeHeader,actualClosedHeader);
-  parseSection(actualClosedHeader,rows.length);
-  return result;
-}
+import {BarModel,BarSnapshot} from './types';
+import {n,norm,s} from './utils';
+export const SHEET_ID='1uLyXG-BXWTjQ7secLVmQkSXduO8EaQIHT6GWQQ4Oe4g';
+export const SHEET_GID='2061682406';
+function rowValues(row:any):string[]{return Array.isArray(row?.c)?row.c.map((x:any)=>String(x?.v??'').trim()):[]}
+function findHeader(rows:string[][],required:string[],start=0){for(let i=start;i<rows.length;i++){const r=rows[i].map(norm);const score=required.filter(x=>r.includes(norm(x))).length;if(score>=Math.min(4,required.length))return i}return -1}
+function parseSection(rows:string[][],header:number,end:number,section:'active'|'closed'):BarModel[]{if(header<0)return[];const h=rows[header].map(norm);const idx=(names:string[])=>{for(const name of names){const j=h.indexOf(norm(name));if(j>=0)return j}return -1};const ti=idx(['Ticker']),si=idx(['Status']),ci=idx(['CMP']),bi=idx(['Buy Price']),ta=idx(['Target']),sl=idx(['Stoploss','Stop Loss']),po=idx(['Position %']),ts=idx(['Trade Status']),bp=idx(['Booked PF']),rp=idx(['Running PF']),rm=idx(['Remarks']);const out:BarModel[]=[];for(let i=header+1;i<(end<0?rows.length:end);i++){const r=rows[i];const ticker=s(ti>=0?r[ti]:'');if(!ticker)continue;const nt=norm(ticker);if(['CASH','INDEXCALCULATIONS','CLOSEDTRADES','ACTIVETRADES','7BARBOOKED'].includes(nt)||nt.includes('NIFTY500')||nt.includes('NIFTY50'))continue;const tradeStatus=s(ts>=0?r[ts]:'');if(section==='active'&&norm(tradeStatus)!=='ACTIVE')continue;if(section==='closed'&&(!tradeStatus||norm(tradeStatus)==='ACTIVE'))continue;out.push({ticker,status:s(si>=0?r[si]:''),cmp:n(ci>=0?r[ci]:null),buyPrice:n(bi>=0?r[bi]:null),target:n(ta>=0?r[ta]:null),stopLoss:n(sl>=0?r[sl]:null),positionPct:n(po>=0?r[po]:null),tradeStatus,bookedPf:n(bp>=0?r[bp]:null),runningPf:n(rp>=0?r[rp]:null),remarks:s(rm>=0?r[rm]:''),section});}return out}
+export function parseGviz(json:any):BarSnapshot{const rows=(json?.table?.rows||[]).map(rowValues);const ah=findHeader(rows,['Ticker','Status','CMP','Buy Price','Target','Stoploss','Position %','Trade Status']);const closedLabel=rows.findIndex((r:string[],i:number)=>i>ah&&norm(r[0])==='CLOSEDTRADES');const ch=findHeader(rows,['Ticker','CMP','Buy Price','Target','Stoploss','Position %','Trade Status','Booked PF'],closedLabel+1);const active=parseSection(rows,ah,ch,'active');const closed=parseSection(rows,ch,rows.length,'closed');let booked:number|null=null;let running:number|null=null;const summaryLabel=rows.findIndex((r:string[])=>norm(r[0])==='7BARBOOKED');if(summaryLabel>=0&&rows[summaryLabel+1]){booked=n(rows[summaryLabel+1][0]);running=n(rows[summaryLabel+1][1]);}const bookedValue=booked??closed.reduce((s,x)=>s+(x.bookedPf??0),0);const runningValue=running??active.reduce((s,x)=>s+(x.runningPf??0),0);return {models:[...active,...closed],bookedPf:bookedValue,runningPf:runningValue,fetchedAt:new Date().toISOString(),activeCount:active.length,closedCount:closed.length}}
