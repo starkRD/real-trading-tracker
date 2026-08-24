@@ -4,14 +4,34 @@ import {ActualTrade} from "@/lib/types"; import {n,s} from "@/lib/utils"; import
 function norm(x:string){return x.toLowerCase().replace(/[^a-z0-9]/g,"")}
 function val(r:Record<string,unknown>,names:string[]){const keys=Object.keys(r);for(const name of names){const k=keys.find(x=>norm(x)===norm(name));if(k)return r[k]}return undefined}
 function convert(rows:Record<string,unknown>[]):ActualTrade[]{
- return rows.map((r,i)=>{
-  const ticker=s(val(r,["Trade Name","Ticker","Symbol"])); if(!ticker)return null;
-  return {id:`actual-${Date.now()}-${i}`,ticker,qty:n(val(r,["QTY","Qty"]))??0,buyDate:s(val(r,["Buy Date","Buy Date "])),buyPrice:n(val(r,["Buy Range","Buy Price"])),
-   target:n(val(r,["Target"])),stopLoss:n(val(r,["Stop Loss","Stoploss"])),soldAt:n(val(r,["Sold AT","Sold AT "])),soldAt2:n(val(r,["SOLD (2nd lot)"])),
-   currentHolding:n(val(r,["Current Holding"])),profitPct:n(val(r,["Profit %"])),loss:n(val(r,["Loss"])),currentAllocation:n(val(r,["Current Alocation","Current Allocation"])),
-   currentPrice:n(val(r,["Current price","Current Price"])),currentValue:n(val(r,["Currnt Value","Current Value"])),
-   runningPf:n(val(r,["Running PF"]))??0,bookedPf:n(val(r,["PF Booked"]))??0,tradeStatus:s(val(r,["Trade Status"])),raw:r};
- }).filter((x):x is ActualTrade=>x!==null&&x.ticker.length>0);
+ const out:ActualTrade[]=[];
+ for(let i=0;i<rows.length;i++){
+  const r=rows[i];
+  const ticker=s(val(r,["Trade Name","Ticker","Symbol"]));
+  if(!ticker) continue;
+  out.push({
+   id:`actual-${Date.now()}-${i}`,
+   ticker,
+   qty:n(val(r,["QTY","Qty"]))??0,
+   buyDate:s(val(r,["Buy Date","Buy Date "])),
+   buyPrice:n(val(r,["Buy Range","Buy Price"])),
+   target:n(val(r,["Target"])),
+   stopLoss:n(val(r,["Stop Loss","Stoploss"])),
+   soldAt:n(val(r,["Sold AT","Sold AT "])),
+   soldAt2:n(val(r,["SOLD (2nd lot)"])),
+   currentHolding:n(val(r,["Current Holding"])),
+   profitPct:n(val(r,["Profit %"])),
+   loss:n(val(r,["Loss"])),
+   currentAllocation:n(val(r,["Current Alocation","Current Allocation"])),
+   currentPrice:n(val(r,["Current price","Current Price"])),
+   currentValue:n(val(r,["Currnt Value","Current Value"])),
+   runningPf:n(val(r,["Running PF"]))??0,
+   bookedPf:n(val(r,["PF Booked"]))??0,
+   tradeStatus:s(val(r,["Trade Status"])),
+   raw:r
+  });
+ }
+ return out;
 }
 async function read(file:File){const ext=file.name.toLowerCase().split(".").pop();if(ext==="csv"){const text=await file.text();return Papa.parse<Record<string,unknown>>(text,{header:true,skipEmptyLines:true}).data}
  const b=await file.arrayBuffer();const wb=XLSX.read(b,{type:"array"});let out:Record<string,unknown>[]=[];for(const sn of wb.SheetNames){out=out.concat(XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[sn],{defval:""}))}return out}
