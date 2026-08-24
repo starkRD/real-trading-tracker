@@ -1,19 +1,34 @@
-# Real Trading Tracker V1
+# Real Trading Tracker
 
-Personal tracker for 7Bar model vs actual broker execution.
+Personal tracker for comparing 7Bar model performance with actual execution.
 
-## V1
-Next.js 14.2.5, TypeScript, Tailwind, CSV/XLSX import, browser localStorage. No broker API, login or multi-user system.
+## Data sources
+
+1. **7Bar**: fetched automatically from the public Google Sheet configured in `app/api/7bar/route.ts`. No Google login, OAuth or environment variable is required because the sheet is publicly readable.
+2. **TRADES**: your actual execution sheet, uploaded as CSV/XLSX.
+3. **Broker report**: planned as a separate source for brokerage, STT, GST, exchange charges, stamp duty, DP charges and other real execution costs.
+
+## 7Bar Google Sheet
+
+The current public source is hardcoded for this personal V1:
+- Spreadsheet ID: `1uLyXG-BXWTjQ7secLVmQkSXduO8EaQIHT6GWQQ4Oe4g`
+- GID: `2061682406`
+
+The server fetches the Google Visualization CSV endpoint with `cache: no-store`, so the tracker can refresh the latest sheet data.
 
 ## Run
+
+```bash
 npm install
 npm run dev
+```
 
-## GitHub → Vercel
-Push this folder to GitHub, import the repo into Vercel, deploy. No environment variables are required for V1.
+## Vercel
 
-## Accounting rule
-Never replace actual execution with the model price. If a GTT at ₹3,215 fails and the real manual exit is ₹3,171.56, ₹3,171.56 remains the actual result. Partial exits remain one trade record.
+No environment variables are required for the 7Bar source in this personal version. Deploy the GitHub repository normally.
 
-## Next priorities
-Exact matching by ticker/date/lot; missed-trade records; partial fills; broker charge import; Groww API; Supabase persistence; model → replicated → actual gross → costs → actual net attribution.
+## Important
+
+The sheet must remain publicly readable. If its owner makes it private or changes the tab/GID, the sync will stop working.
+
+Actual broker costs are intentionally not mixed into 7Bar or TRADES. They will be imported separately later.
