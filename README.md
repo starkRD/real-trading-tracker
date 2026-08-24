@@ -1,34 +1,61 @@
-# Real Trading Tracker
+# Real Trading Tracker V2
 
-Personal tracker for comparing 7Bar model performance with actual execution.
+Personal tracker built around the user's actual two source files.
 
-## Data sources
+## Sources
 
-1. **7Bar**: fetched automatically from the public Google Sheet configured in `app/api/7bar/route.ts`. No Google login, OAuth or environment variable is required because the sheet is publicly readable.
-2. **TRADES**: your actual execution sheet, uploaded as CSV/XLSX.
-3. **Broker report**: planned as a separate source for brokerage, STT, GST, exchange charges, stamp duty, DP charges and other real execution costs.
+1. **7Bar** — fetched live from the public Google Sheet. No API key, OAuth, or environment variable is required.
+2. **TRADES** — user uploads CSV/XLSX containing the actual execution and the existing `PF Booked` and `Running PF` columns.
+3. **Broker report** — intentionally not implemented in V2. It will be a separate source for brokerage, STT, GST, exchange charges, stamp duty, DP charges, etc.
 
-## 7Bar Google Sheet
+## V2 dashboard
 
-The current public source is hardcoded for this personal V1:
-- Spreadsheet ID: `1uLyXG-BXWTjQ7secLVmQkSXduO8EaQIHT6GWQQ4Oe4g`
-- GID: `2061682406`
+- 7Bar Booked % and ₹
+- My Booked % and ₹
+- Booked difference
+- 7Bar Running PF % and ₹
+- My Running PF % and ₹
+- Running difference
+- Missing tickers
+- Missed model contribution
+- Active trade comparison
+- Live 7Bar refresh
 
-The server fetches the Google Visualization CSV endpoint with `cache: no-store`, so the tracker can refresh the latest sheet data.
+## Current files were inspected
+
+7Bar CSV:
+- 97 rows
+- Active section with 9 active stocks + cash
+- Closed section with 73 model entries
+- Summary: 7Bar Booked 0.42%, 7Bar Running -1.58%
+
+TRADES CSV:
+- 110 rows
+- 67 Booked rows
+- 9 Active rows
+- PF Booked total -1.63%
+- Running PF total -1.75%
+
+With the supplied files, conservative ticker-level matching identifies:
+- LIQUIDCASE — missing
+- POWERINDIA — missing
+
+LTIM is matched to LTM.
+Partial exits remain a single TRADES row and are not counted as separate missing trades.
+
+## No env vars
+
+The 7Bar Google Sheet is public. The server fetches:
+`https://docs.google.com/spreadsheets/d/<SHEET_ID>/gviz/tq?tqx=out:json&gid=<GID>`
+
+Keep the sheet public for this to work.
 
 ## Run
 
-```bash
 npm install
 npm run dev
-```
 
-## Vercel
+Then import the TRADES CSV/XLSX from `/import`.
 
-No environment variables are required for the 7Bar source in this personal version. Deploy the GitHub repository normally.
-
-## Important
-
-The sheet must remain publicly readable. If its owner makes it private or changes the tab/GID, the sync will stop working.
-
-Actual broker costs are intentionally not mixed into 7Bar or TRADES. They will be imported separately later.
+## Ticker name changes
+The tracker canonicalizes symbols before matching. LTIM → LTM is included by default. Future symbol changes can be added from Settings (for example OLD → NEW), so historical TRADES and current 7Bar data continue to match as one stock.

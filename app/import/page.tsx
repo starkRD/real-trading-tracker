@@ -1,92 +1,27 @@
 "use client";
-
-import { useEffect, useState } from "react";
-import Papa from "papaparse";
-import * as XLSX from "xlsx";
-import { saveActuals, actuals } from "@/lib/store";
-import { ActualTrade } from "@/lib/types";
-import { save7BarSnapshot } from "@/lib/7bar";
-
-const clean = (v: unknown) => String(v ?? "").toLowerCase().replace(/\uFEFF/g, "").replace(/[^a-z0-9]+/g, "");
-const text = (v: unknown) => String(v ?? "").trim();
-const num = (v: unknown): number | undefined => {
-  if (v === undefined || v === null || v === "") return undefined;
-  const x = Number(String(v).replace(/[₹,%\s,]/g, ""));
-  return Number.isFinite(x) ? x : undefined;
-};
-
-function findHeader(rows: unknown[][]) {
-  for (let r = 0; r < Math.min(rows.length, 100); r++) {
-    const cells = rows[r].map(clean);
-    if (cells.some(c => c === "tradename" || c === "ticker" || c === "qty")) return r;
-  }
-  return -1;
+import {useState} from "react"; import Papa from "papaparse"; import * as XLSX from "xlsx";
+import {ActualTrade} from "@/lib/types"; import {n,s} from "@/lib/utils"; import {saveActual} from "@/lib/storage";
+function norm(x:string){return x.toLowerCase().replace(/[^a-z0-9]/g,"")}
+function val(r:Record<string,unknown>,names:string[]){const keys=Object.keys(r);for(const name of names){const k=keys.find(x=>norm(x)===norm(name));if(k)return r[k]}return undefined}
+function convert(rows:Record<string,unknown>[]):ActualTrade[]{
+ return rows.map((r,i)=>{
+  const ticker=s(val(r,["Trade Name","Ticker","Symbol"])); if(!ticker)return null;
+  return {id:`actual-${Date.now()}-${i}`,ticker,qty:n(val(r,["QTY","Qty"]))??0,buyDate:s(val(r,["Buy Date","Buy Date "])),buyPrice:n(val(r,["Buy Range","Buy Price"])),
+   target:n(val(r,["Target"])),stopLoss:n(val(r,["Stop Loss","Stoploss"])),soldAt:n(val(r,["Sold AT","Sold AT "])),soldAt2:n(val(r,["SOLD (2nd lot)"])),
+   currentHolding:n(val(r,["Current Holding"])),profitPct:n(val(r,["Profit %"])),loss:n(val(r,["Loss"])),currentAllocation:n(val(r,["Current Alocation","Current Allocation"])),
+   currentPrice:n(val(r,["Current price","Current Price"])),currentValue:n(val(r,["Currnt Value","Current Value"])),
+   runningPf:n(val(r,["Running PF"]))??0,bookedPf:n(val(r,["PF Booked"]))??0,tradeStatus:s(val(r,["Trade Status"])),raw:r};
+ }).filter((x):x is ActualTrade=>x!==null&&x.ticker.length>0);
 }
-function readRows(matrix: unknown[][]) {
-  const h = findHeader(matrix);
-  if (h < 0) return [];
-  const headers = matrix[h].map(clean);
-  const idx = (names: string[]) => names.map(clean).map(n => headers.indexOf(n)).find(i => i >= 0) ?? -1;
-  const ix = {
-    ticker: idx(["Trade Name", "Ticker", "Symbol"]), qty: idx(["QTY", "Qty", "Quantity"]), buy: idx(["Buy Range", "Buy Price", "Buy"]),
-    date: idx(["Buy Date", "Date"]), sell1: idx(["Sold AT", "Sell Price", "Sell"]), sellQty1: idx(["Sell qty L1", "Sell Qty 1", "Sell Quantity 1"]),
-    sell2: idx(["SOLD (2nd lot)", "Sell Price 2", "Sold 2"]), sellQty2: idx(["Sell qty L2", "Sell Qty 2", "Sell Quantity 2"]), status: idx(["Trade Status", "Status"])
-  };
-  return matrix.slice(h + 1).map(r => ({
-    ticker: ix.ticker >= 0 ? text(r[ix.ticker]) : "", qty: ix.qty >= 0 ? num(r[ix.qty]) || 0 : 0, buy: ix.buy >= 0 ? num(r[ix.buy]) || 0 : 0,
-    date: ix.date >= 0 ? text(r[ix.date]) : "", sell1: ix.sell1 >= 0 ? num(r[ix.sell1]) : undefined, sellQty1: ix.sellQty1 >= 0 ? num(r[ix.sellQty1]) : undefined,
-    sell2: ix.sell2 >= 0 ? num(r[ix.sell2]) : undefined, sellQty2: ix.sellQty2 >= 0 ? num(r[ix.sellQty2]) : undefined,
-    status: ix.status >= 0 ? text(r[ix.status]) : "booked"
-  })).filter(r => r.ticker && r.qty > 0 && r.buy > 0);
-}
-async function readActualFile(file: File) {
-  if (file.name.toLowerCase().endsWith(".csv")) {
-    const parsed = Papa.parse<string[]>(await file.text(), { skipEmptyLines: true });
-    return readRows(parsed.data as unknown[][]);
-  }
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: false });
-  return workbook.SheetNames.flatMap(name => readRows(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, defval: "", raw: false })));
-}
-
-export default function Import() {
-  const [msg, setMsg] = useState("");
-  const [syncing, setSyncing] = useState(false);
-
-  async function sync7Bar() {
-    setSyncing(true); setMsg("");
-    try {
-      const res = await fetch("/api/7bar", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Could not fetch 7Bar");
-      save7BarSnapshot({ active: data.active, closed: data.closed, fetchedAt: data.fetchedAt, total: data.total });
-      setMsg(`7Bar synced: ${data.active.length} active + ${data.closed.length} closed = ${data.total} model rows.`);
-      window.dispatchEvent(new Event("rtt:7bar-sync"));
-    } catch (e) { setMsg(`7Bar sync failed: ${e instanceof Error ? e.message : "Unknown error"}`); }
-    finally { setSyncing(false); }
-  }
-
-  async function importActual(file?: File) {
-    if (!file) return;
-    setSyncing(true); setMsg("");
-    try {
-      const rows = await readActualFile(file);
-      const incoming: ActualTrade[] = rows.map((r, i) => ({ id: `a-${Date.now()}-${i}`, ticker: r.ticker, qty: r.qty, buy: r.buy, date: r.date, sell1: r.sell1, sellQty1: r.sellQty1, sell2: r.sell2, sellQty2: r.sellQty2, status: r.status || "booked" }));
-      saveActuals([...actuals(), ...incoming]);
-      setMsg(`Imported ${incoming.length} actual TRADES rows.`);
-    } catch (e) { setMsg(`TRADES import failed: ${e instanceof Error ? e.message : "Unknown error"}`); }
-    finally { setSyncing(false); }
-  }
-
-  useEffect(() => { sync7Bar(); }, []);
-
-  return <>
-    <h1 className="text-3xl font-bold">Data Sources</h1>
-    <p className="mt-2 text-sm text-zinc-400">7Bar is now fetched directly from its public Google Sheet. Your TRADES file remains an upload.</p>
-    <div className="grid gap-5 md:grid-cols-2 mt-7">
-      <div className="card p-6"><b>7Bar model — Live Google Sheet</b><p className="mt-2 text-sm text-zinc-500">No upload or Google account is required. The app fetches the public sheet from the server.</p><button className="primary mt-5" disabled={syncing} onClick={sync7Bar}>{syncing ? "Syncing..." : "Refresh 7Bar"}</button></div>
-      <div className="card p-6"><b>Your TRADES</b><p className="mt-2 text-sm text-zinc-500">Upload your actual TRADES CSV/XLSX. Broker charges will be a separate data source later.</p><label className="primary inline-block mt-5 cursor-pointer">{syncing ? "Working..." : "Import TRADES"}<input className="hidden" type="file" accept=".csv,.xlsx,.xls" disabled={syncing} onChange={e => importActual(e.target.files?.[0])}/></label></div>
-    </div>
-    {msg && <div className="mt-5 rounded-xl border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-300">{msg}</div>}
-    <div className="card mt-6 p-6 text-sm text-zinc-400"><b className="text-white">Broker data:</b> STT, GST, brokerage, exchange charges, stamp duty and DP charges will come from a separate broker report. They are not expected in either 7Bar or TRADES.</div>
-  </>;
+async function read(file:File){const ext=file.name.toLowerCase().split(".").pop();if(ext==="csv"){const text=await file.text();return Papa.parse<Record<string,unknown>>(text,{header:true,skipEmptyLines:true}).data}
+ const b=await file.arrayBuffer();const wb=XLSX.read(b,{type:"array"});let out:Record<string,unknown>[]=[];for(const sn of wb.SheetNames){out=out.concat(XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[sn],{defval:""}))}return out}
+export default function ImportPage(){
+ const [msg,setMsg]=useState("");
+ async function go(file?:File){if(!file)return;try{const rows=await read(file);const t=convert(rows);saveActual(t);setMsg(`Imported ${t.length} TRADES rows. Dashboard will now use these actual booked/running PF values.`)}catch(e){setMsg(e instanceof Error?e.message:"Import failed")}}
+ return <div className="max-w-3xl"><h1 className="text-3xl font-bold">Import your TRADES sheet</h1><p className="mt-2 text-sm text-zinc-400">7Bar is live — no upload needed. Upload only your actual TRADES CSV/XLSX.</p>
+ <div className="card mt-6 p-7"><div className="text-lg font-semibold">TRADES</div><div className="mt-2 text-sm text-zinc-500">The importer uses your columns: Trade Name, QTY, Buy Range, Sold AT, Current Holding, Running PF, PF Booked, Trade Status and the other execution fields.</div>
+ <label className="btn-primary mt-5 inline-block cursor-pointer">Choose TRADES CSV/XLSX<input className="hidden" type="file" accept=".csv,.xlsx,.xls" onChange={e=>go(e.target.files?.[0])}/></label>
+ {msg&&<div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-300">{msg}</div>}</div>
+ <div className="card mt-5 p-6"><div className="font-semibold">Current V2 calculation</div><ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-zinc-400"><li>Booked PF = sum of your <b className="text-white">PF Booked</b> column.</li><li>Running PF = sum of your <b className="text-white">Running PF</b> column.</li><li>Active holdings are not treated as booked losses.</li><li>Partial sells remain part of the same TRADES row.</li><li>Broker costs are intentionally not included yet.</li></ul></div>
+ </div>
 }

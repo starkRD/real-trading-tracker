@@ -1,1 +1,7 @@
-export default function Metric({label,value,sub}:{label:string;value:string;sub?:string}){return <div className="card p-5"><div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div><div className="mt-2 text-2xl font-bold">{value}</div>{sub&&<div className="mt-1 text-xs text-zinc-500">{sub}</div>}</div>}
+import {cls,money,pct} from "@/lib/utils";
+export default function Metric({title,pctValue,rupee,sub,accent}:{title:string;pctValue?:number;rupee?:number;sub?:string;accent?:number}){
+ return <div className="card p-5"><div className="label">{title}</div>
+  <div className={`mt-2 text-3xl font-bold ${cls(accent??pctValue??0)}`}>{pctValue===undefined?"—":pct(pctValue)}</div>
+  <div className="mt-1 text-base font-semibold">{rupee===undefined?"—":money(rupee)}</div>
+  {sub&&<div className="mt-2 text-xs text-zinc-500">{sub}</div>}</div>
+}

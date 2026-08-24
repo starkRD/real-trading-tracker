@@ -1,4 +1,12 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-*{box-sizing:border-box}html,body{margin:0;background:#09090b;color:#f4f4f5;font-family:Arial,Helvetica,sans-serif}.card{border:1px solid #27272a;border-radius:16px;background:#0f0f12}.btn{border:1px solid #3f3f46;border-radius:10px;padding:9px 14px;font-size:14px}.btn:hover{background:#18181b}.primary{border-radius:10px;background:#fff;color:#000;padding:9px 14px;font-size:14px;font-weight:600}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#09090b;color:#f4f4f5;font-family:Arial,Helvetica,sans-serif}
+body{min-height:100vh}
+button,input{font:inherit}
+.card{@apply rounded-2xl border border-zinc-800 bg-zinc-950/80}
+.btn{@apply rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold hover:bg-zinc-800}
+.btn-primary{@apply rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200}
+.label{@apply text-xs uppercase tracking-wider text-zinc-500}
