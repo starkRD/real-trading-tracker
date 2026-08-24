@@ -1,7 +1,6 @@
-export type Action='BUY'|'SELL';
-export type Strategy='7Bar Swing'|'Long Term'|'Personal Pick'|'Other';
-export type Transaction={id:string;ticker:string;action:Action;qty:number;price:number;date:string;strategy:Strategy;source:'manual'|'import';note?:string};
-export type Position={ticker:string;strategy:Strategy;qty:number;avgBuy:number;invested:number;avgSell:number;realized:number;currentPrice:number|null;marketValue:number;running:number;runningPct:number};
-export type BarModel={ticker:string;status:string;cmp:number|null;buyPrice:number|null;target:number|null;stopLoss:number|null;positionPct:number|null;tradeStatus:string;bookedPf:number|null;runningPf:number|null;remarks:string;section:'active'|'closed'};
-export type BarSnapshot={models:BarModel[];bookedPf:number;runningPf:number;fetchedAt:string;activeCount:number;closedCount:number};
-export type Settings={startingCapital:number;tickerAliases:Record<string,string>;priceOverrides:Record<string,number>};
+export type TradeStatus = 'Active'|'Booked'|'NA'|'Unknown';
+export type Transaction = { id:string; ticker:string; action:'BUY'|'SELL'; qty:number; price:number; date:string; strategy:string; source:'manual' };
+export type Position = {ticker:string; qty:number; avgBuy:number; invested:number; currentPrice:number|null; currentValue:number|null; running:number|null; runningPct:number|null; status:TradeStatus; strategy:string; sourceRow?:number};
+export type ImportedState = {startingCapital:number; historicalBooked:number; historicalProfit:number; historicalLoss:number; activeInvestment:number; currentValue:number; activePositions:Position[]; transactions:Transaction[]; bookedInvestment:number; totalInvested:number; charges:number; importedAt:string; sourceName:string};
+export type BarTrade = {ticker:string; status:string; cmp:number|null; buy:number|null; target:number|null; stop:number|null; positionPct:number|null; bookedPct:number|null; runningPct:number|null; date?:string; notes?:string};
+export type BarSummary = {bookedPct:number|null; runningPct:number|null};
