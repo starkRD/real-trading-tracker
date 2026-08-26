@@ -12,7 +12,7 @@ export default function App(){
  const [positions,setPositions]=useState<Position[]>(defaultPositions);
  const [txs,setTxs]=useState<Tx[]>([]);
  const [cash,setCash]=useState(startingCapital-sourceSnapshot.activeInvestment);
- const [seven,setSeven]=useState({booked:.42,running:-1.2,active:string[]});
+ const [seven,setSeven]=useState({booked:.42,running:-1.2,active:[] as string[]});
  const [modal,setModal]=useState(false);
  const [selected,setSelected]=useState<Position|null>(null);
  const [notice,setNotice]=useState("Source snapshot loaded.");
@@ -410,8 +410,7 @@ export default function App(){
     </div>
    }
   </main>
- }
-}
+ );}
 
 function SheetModal({url,setUrl,onClose,onFetch,loading}:{url:string;setUrl:(v:string)=>void;onClose:()=>void;onFetch:()=>void;loading:boolean}){
  return (
