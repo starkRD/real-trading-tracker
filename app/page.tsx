@@ -1,6 +1,5 @@
  "use client";
 import {useEffect,useMemo,useState} from "react";
-import * as XLSX from "xlsx";
 import {canonical,Position,Strategy,Tx} from "@/lib/types";
 import {defaultPositions,sourceSnapshot,startingCapital} from "@/lib/defaults";
 
@@ -16,7 +15,7 @@ function App(){
  const [modal,setModal]=useState(false);
  const [selected,setSelected]=useState<Position|null>(null);
  const [notice,setNotice]=useState("Source snapshot loaded from your TRADES workbook structure.");
- const [importing,setImporting]=useState(false);
+ const [importing,setImporting]=useState(false); const [sheetOpen,setSheetOpen]=useState(false); const [sheetUrl,setSheetUrl]=useState(""); const [lastSync,setLastSync]=useState<string>("");
 
  useEffect(()=>{try{const raw=localStorage.getItem("rtt-v3-state");if(raw){const s=JSON.parse(raw);if(s.positions)setPositions(s.positions);if(s.txs)setTxs(s.txs);if(typeof s.cash==="number")setCash(s.cash)}}catch{}},[]);
  useEffect(()=>{localStorage.setItem("rtt-v3-state",JSON.stringify({positions,txs,cash}))},[positions,txs,cash]);
@@ -46,23 +45,27 @@ function App(){
    }
    setPositions(next);setTxs(t=>[...t,tx]);setModal(false);setNotice(`${tx.action} recorded for ${key}`);
  }
- function importWorkbook(file:File){
-   setImporting(true);const reader=new FileReader();
-   reader.onload=()=>{try{
-     const wb=XLSX.read(reader.result,{type:"array"});const ws=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase()==="trades")||wb.SheetNames[0]];
-     const rows=XLSX.utils.sheet_to_json<Record<string,unknown>>(ws,{defval:null});
+ async function fetchTradesSheet(){
+   if(!sheetUrl.trim()){setNotice("Paste your public Google Sheet URL first.");return}
+   setImporting(true);
+   try{
+     const r=await fetch("/api/trades",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:sheetUrl})});
+     const data=await r.json();
+     if(!r.ok) throw new Error(data?.error||"Unable to fetch TRADES sheet");
+     const rows=data.rows as Record<string,unknown>[];
      const active=rows.filter(r=>String(r["Trade Status"]??r["Status"]??"").toLowerCase().includes("active") && Number(r["Current Holding"]??r["Current Holding "]??0)>0);
-     const mapped:Position[]=active.map((r)=>{const ticker=canonical(String(r["Trade Name"]??r["Ticker"]??""));const qty=Number(r["Current Holding"]??0);const invested=Number(r["Current Alocation"]??r["Current Allocation"]??0);const value=Number(r["Currnt Value"]??r["Current Value"]??0);const cmp=Number(r["Currnt Price"]??r["Current Price"]??0)||null;const avg=qty?invested/qty:0;const running=value?value-invested:null;return {ticker,strategy:"7Bar Swing",qty,avgBuy:avg,invested,avgSell:null,booked:0,cmp,value,running,runningPct:invested?running!/invested*100:null}});
-     if(mapped.length){setPositions(mapped);setCash(startingCapital-mapped.reduce((a,p)=>a+p.invested,0));setNotice(`Imported ${mapped.length} active positions from TRADES. Historical booked P&L remains from the workbook snapshot.`)}else setNotice("No active positions found in the imported Trades sheet.");
-   }catch(e){setNotice(e instanceof Error?e.message:"Import failed")}finally{setImporting(false)}};reader.readAsArrayBuffer(file);
+     const mapped:Position[]=active.map((r)=>{const ticker=canonical(String(r["Trade Name"]??r["Ticker"]??r["Symbol"]??""));const qty=Number(r["Current Holding"]??r["Current Holding "]??0);const invested=Number(r["Current Alocation"]??r["Current Allocation"]??0);const value=Number(r["Currnt Value"]??r["Current Value"]??0);const cmp=Number(r["Currnt Price"]??r["Current Price"]??0)||null;const avg=qty?invested/qty:0;const running=value-invested;return {ticker,strategy:"7Bar Swing",qty,avgBuy:avg,invested,avgSell:null,booked:0,cmp,value,running,runningPct:invested?running/invested*100:null}});
+     if(!mapped.length) throw new Error("The sheet was fetched, but no rows with Trade Status = Active and Current Holding > 0 were found.");
+     setPositions(mapped); setCash(startingCapital-mapped.reduce((a,p)=>a+p.invested,0)); setLastSync(new Date().toLocaleString("en-IN")); setSheetOpen(false); setNotice(`TRADES synced: ${mapped.length} active positions • ${new Date().toLocaleTimeString()}`);
+   }catch(e){setNotice(e instanceof Error?e.message:"TRADES sync failed")}finally{setImporting(false)}
  }
  const invested=positions.reduce((a,p)=>a+p.invested,0), value=positions.reduce((a,p)=>a+(p.value??0),0), running=value-invested;
  const actualBooked=sourceSnapshot.netProfit, equity=cash+value;
  const active7=useMemo(()=>new Set(seven.active),[seven.active]);
  const activeCompare=positions.filter(p=>p.strategy==="7Bar Swing" && (seven.active.length===0 || active7.has(canonical(p.ticker))));
  return <main className="shell">
-  <header className="top"><div className="brand"><div className="logo">RT</div><div><div className="title">Real Trading Tracker</div><div className="muted">7Bar vs your actual trading</div></div></div><div className="actions"><label className="btn"><input hidden type="file" accept=".xlsx,.xls,.csv" onChange={e=>e.target.files?.[0]&&importWorkbook(e.target.files[0])}/>{importing?"Importing…":"Import TRADES"}</label><button className="btn" onClick={refresh7}>↻ Refresh 7Bar</button><button className="btn primary" onClick={()=>setModal(true)}>＋ Add transaction</button></div></header>
-  <div className="notice">{notice}</div>
+  <header className="top"><div className="brand"><div className="logo">RT</div><div><div className="title">Real Trading Tracker</div><div className="muted">7Bar vs your actual trading</div></div></div><div className="actions"><button className="btn" onClick={()=>setSheetOpen(true)}>⚙ TRADES Sheet</button><button className="btn" onClick={refresh7}>↻ Refresh 7Bar</button><button className="btn primary" onClick={()=>setModal(true)}>＋ Add transaction</button></div></header>
+  <div className="notice">{notice}{lastSync&&<span className="small" style={{float:"right"}}>TRADES last sync: {lastSync}</span>}</div>
   <section className="section"><div className="section-head"><div><div className="section-title">Portfolio overview</div><div className="muted small">Current state from your TRADES data + manual updates</div></div></div>
    <div className="grid4">
     <div className="card"><div className="kpi-label">Starting capital</div><div className="kpi">{money(startingCapital)}</div><div className="sub">Tracking capital</div></div>
@@ -84,7 +87,7 @@ function App(){
   <section className="section"><div className="section-head"><div><div className="section-title">Recent transactions</div><div className="muted small">Manual BUY / SELL activity in this browser</div></div></div>
    <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Stock</th><th>Action</th><th>Qty</th><th>Price</th><th>Strategy</th></tr></thead><tbody>{txs.slice().reverse().map(t=><tr key={t.id}><td>{t.date}</td><td className="stock">{t.ticker}</td><td><span className={`pill ${t.action==="BUY"?"active":"closed"}`}>{t.action}</span></td><td>{t.qty}</td><td>{money(t.price)}</td><td>{t.strategy}</td></tr>)}{!txs.length&&<tr><td colSpan={6} className="empty">No manual transactions yet. Use “Add transaction”.</td></tr>}</tbody></table></div>
   </section>
-  {modal&&<TxModal onClose={()=>setModal(false)} onSave={addTx}/>}
+  {sheetOpen&&<SheetModal url={sheetUrl} setUrl={setSheetUrl} onClose={()=>setSheetOpen(false)} onFetch={fetchTradesSheet} loading={importing}/>} {modal&&<TxModal onClose={()=>setModal(false)} onSave={addTx}/>}
   {selected&&<div className="modal-bg" onClick={()=>setSelected(null)}><div className="modal" onClick={e=>e.stopPropagation()}><div className="section-title">{selected.ticker}</div><div className="muted">Current position</div><div className="grid2"><div className="card"><div className="kpi-label">Holding</div><div className="kpi">{selected.qty}</div></div><div className="card"><div className="kpi-label">Invested</div><div className="kpi">{money(selected.invested)}</div></div><div className="card"><div className="kpi-label">Avg buy</div><div className="kpi">{money(selected.avgBuy)}</div></div><div className="card"><div className="kpi-label">Running</div><div className={`kpi ${cls(selected.running)}`}>{money(selected.running)}</div></div></div><div className="modal-actions"><button className="btn" onClick={()=>setSelected(null)}>Close</button><button className="btn primary" onClick={()=>{setSelected(null);setModal(true)}}>＋ Transaction</button></div></div></div>}
  </main>
 }
