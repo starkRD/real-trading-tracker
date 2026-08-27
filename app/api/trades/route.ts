@@ -1,10 +1,5 @@
 import {NextResponse} from "next/server";
-function sheetUrlToCsv(input:string){
- const u=new URL(input.trim());
- if(u.hostname!=="docs.google.com" || !u.pathname.includes("/spreadsheets/d/")) throw new Error("Please use a Google Sheets URL.");
- const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/); if(!m) throw new Error("Could not find the Google Sheet ID.");
- const id=m[1]; const gid=u.searchParams.get("gid")||u.hash.match(/gid=(\d+)/)?.[1]||"";
- return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv${gid?`&gid=${encodeURIComponent(gid)}`:""}`;
-}
-function parseCsv(text:string){const rows:string[][]=[];let row:string[]=[],cell="",q=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(q&&text[i+1]==='"'){cell+='"';i++;}else q=!q;}else if(c===','&&!q){row.push(cell);cell="";}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);cell="";if(row.some(x=>x.trim()!==""))rows.push(row);row=[];}else cell+=c;}if(cell||row.length){row.push(cell);if(row.some(x=>x.trim()!==""))rows.push(row);}return rows;}
-export async function POST(req:Request){try{const {url}=await req.json();if(typeof url!=="string")throw new Error("Missing Google Sheet URL.");const csvUrl=sheetUrlToCsv(url);const r=await fetch(csvUrl,{cache:"no-store",headers:{"user-agent":"RealTradingTracker/1.0"}});const text=await r.text();if(!r.ok)throw new Error(`Google Sheets returned ${r.status}.`);if(/<html|sign in|requested document was not found/i.test(text))throw new Error("Google Sheet is not publicly accessible. Set sharing to Anyone with the link / Viewer or publish the sheet to the web.");const raw=parseCsv(text);if(raw.length<2)throw new Error("Google returned no sheet rows. Check the URL and public access.");const headers=raw[0].map(x=>x.trim());const rows=raw.slice(1).map(r=>Object.fromEntries(headers.map((h,i)=>[h,r[i]??""])));return NextResponse.json({rows,count:rows.length});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"TRADES fetch failed"},{status:400});}}
+import {googleCsvUrl,parseCsv} from "@/lib/csv";
+import {parseTrades} from "@/lib/parse";
+const DEFAULT_URL="https://docs.google.com/spreadsheets/d/1DS_j0bSRdVBlLTND5R4TUHMdTAhk3SbN5AT8SDJma20/edit?gid=0#gid=0";
+export async function POST(req:Request){try{const body=await req.json().catch(()=>({}));const url=typeof body.url==="string"&&body.url.trim()?body.url:DEFAULT_URL;const csv=googleCsvUrl(url);const r=await fetch(csv,{cache:"no-store"});const text=await r.text();if(!r.ok)throw new Error(`Google Sheets returned ${r.status}.`);if(/<html|sign in|requested document was not found/i.test(text))throw new Error("TRADES sheet is not publicly accessible. Use Anyone with the link / Viewer.");return NextResponse.json(parseTrades(parseCsv(text)));}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"TRADES fetch failed"},{status:400});}}

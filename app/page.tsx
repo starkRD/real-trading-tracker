@@ -1,478 +1,113 @@
- "use client";
+"use client";
+import {useEffect,useMemo,useState} from "react";
+import {canonical} from "@/lib/canonical";
+import type {Position,SevenData,Transaction,TradesData} from "@/lib/types";
 
-import { useEffect, useMemo, useState } from "react";
-import { canonical, Position, Strategy, Tx } from "@/lib/types";
-import { defaultPositions, sourceSnapshot, startingCapital } from "@/lib/defaults";
+const CAPITAL=300000;
+const SEVEN_URL="https://docs.google.com/spreadsheets/d/1uLyXG-BXWTjQ7secLVmQkSXduO8EaQIHT6GWQQ4Oe4g/edit?gid=2061682406#gid=2061682406";
+const TRADES_URL="https://docs.google.com/spreadsheets/d/1DS_j0bSRdVBlLTND5R4TUHMdTAhk3SbN5AT8SDJma20/edit?gid=0#gid=0";
+const money=(n:number|null|undefined)=>n==null?"—":`${n<0?"−":""}₹${Math.round(Math.abs(n)).toLocaleString("en-IN")}`;
+const pct=(n:number|null|undefined)=>n==null?"—":`${n>=0?"+":"−"}${Math.abs(n).toFixed(2)}%`;
+const tone=(n:number|null|undefined)=>n==null?"":n>=0?"good":"bad";
+const signedPp=(n:number)=>`${n>=0?"+":"−"}${Math.abs(n).toFixed(2)} pp`;
 
-const money=(n:number|null|undefined)=>n==null?"—":`₹${Math.round(n).toLocaleString("en-IN")}`;
-const pct=(n:number|null|undefined)=>n==null?"—":`${n>=0?"+":""}${n.toFixed(2)}%`;
-const cls=(n:number|null|undefined)=>n==null?"":n>=0?"pos":"neg";
+function Card({label,value,sub,className=""}:{label:string;value:React.ReactNode;sub?:React.ReactNode;className?:string}){return <div className={`card kpi-card ${className}`}><div className="eyebrow">{label}</div><div className="big-number">{value}</div>{sub&&<div className="sub">{sub}</div>}</div>}
+function Section({title,desc,children,action}:{title:string;desc?:string;children:React.ReactNode;action?:React.ReactNode}){return <section className="section"><div className="section-head"><div><h2>{title}</h2>{desc&&<p>{desc}</p>}</div>{action}</div>{children}</section>}
 
 export default function App(){
- const [positions,setPositions]=useState<Position[]>(defaultPositions);
- const [txs,setTxs]=useState<Tx[]>([]);
- const [cash,setCash]=useState(startingCapital-sourceSnapshot.activeInvestment);
- const [seven,setSeven]=useState({booked:.42,running:-1.2,active:[] as string[]});
- const [modal,setModal]=useState(false);
- const [selected,setSelected]=useState<Position|null>(null);
- const [notice,setNotice]=useState("Source snapshot loaded.");
- const [syncing,setSyncing]=useState(false);
- const [sheetOpen,setSheetOpen]=useState(false);
- const [sheetUrl,setSheetUrl]=useState("");
- const [lastSync,setLastSync]=useState("");
+ const [seven,setSeven]=useState<SevenData>({bookedPct:null,runningPct:null,active:[],closed:[],syncedAt:null});
+ const [trades,setTrades]=useState<TradesData>({positions:[],booked:0,invested:0,value:0,sourceRows:0,syncedAt:null});
+ const [manual,setManual]=useState<Transaction[]>([]);
+ const [manualPositions,setManualPositions]=useState<Position[]>([]);
+ const [sevenLoading,setSevenLoading]=useState(false); const [tradesLoading,setTradesLoading]=useState(false);
+ const [notice,setNotice]=useState("Loading live sheets…");
+ const [showSettings,setShowSettings]=useState(false); const [tradesUrl,setTradesUrl]=useState(TRADES_URL);
+ const [showTx,setShowTx]=useState(false); const [selected,setSelected]=useState<Position|null>(null);
 
- useEffect(()=>{
-   try{
-     const raw=localStorage.getItem("rtt-v3-state");
-     if(raw){
-       const s=JSON.parse(raw);
-       if(s.positions)setPositions(s.positions);
-       if(s.txs)setTxs(s.txs);
-       if(typeof s.cash==="number")setCash(s.cash);
-       if(typeof s.sheetUrl==="string")setSheetUrl(s.sheetUrl);
-       if(typeof s.lastSync==="string")setLastSync(s.lastSync);
-     }
-   }catch{}
- },[]);
+ async function refreshSeven(){setSevenLoading(true);try{const r=await fetch("/api/7bar",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"7Bar refresh failed");setSeven(d);setNotice(`7Bar refreshed ${new Date().toLocaleTimeString()}`);}catch(e){setNotice(e instanceof Error?e.message:"7Bar refresh failed")}finally{setSevenLoading(false)}}
+ async function refreshTrades(url=tradesUrl){setTradesLoading(true);try{const r=await fetch("/api/trades",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url}),cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"TRADES refresh failed");setTrades(d);setManual([]);setManualPositions([]);setNotice(`TRADES refreshed: ${d.positions.length} active holdings`);}catch(e){setNotice(e instanceof Error?e.message:"TRADES refresh failed")}finally{setTradesLoading(false)}}
+ useEffect(()=>{void refreshSeven();void refreshTrades(TRADES_URL)},[]);
 
- useEffect(()=>{
-   try{localStorage.setItem("rtt-v3-state",JSON.stringify({positions,txs,cash,sheetUrl,lastSync}))}catch{}
- },[positions,txs,cash,sheetUrl,lastSync]);
-
- async function refresh7(){
-   try{
-     const r=await fetch("/api/7bar",{cache:"no-store"});
-     const text=await r.text();
-     if(!r.ok)throw new Error(text);
-     const rows=text.split(/\r?\n/).filter(Boolean).map(x=>x.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(v=>v.replace(/^"|"$/g,"")));
-     const header=rows.find(r=>r.some(c=>c.trim().toLowerCase()==="ticker"));
-     const hi=header?rows.indexOf(header):-1;
-     let booked=.42,running=-1.2,active:string[]=[];
-     for(const r of rows){
-       const line=r.join(" ");
-       const b=line.match(/7Bar Booked[^0-9-]*(-?\d+(?:\.\d+)?)%/i);
-       const rr=line.match(/7Bar Running[^0-9-]*(-?\d+(?:\.\d+)?)%/i);
-       if(b)booked=Number(b[1]);
-       if(rr)running=Number(rr[1]);
-     }
-     if(hi>=0){
-       for(const r of rows.slice(hi+1)){
-         const t=canonical(r[0]||"");
-         const status=r.find(c=>/active/i.test(c));
-         if(t&&status&&/active/i.test(status))active.push(t);
-       }
-     }
-     setSeven({booked,running,active});
-     setNotice(`7Bar refreshed ${new Date().toLocaleTimeString()}`);
-   }catch(e){
-     setNotice(e instanceof Error?e.message:"7Bar refresh failed");
-   }
- }
-
- async function fetchTradesSheet(){
-   if(!sheetUrl.trim()){
-     setNotice("Paste your public Google Sheet URL first.");
-     return;
-   }
-   setSyncing(true);
-   try{
-     const r=await fetch("/api/trades",{
-       method:"POST",
-       headers:{"content-type":"application/json"},
-       body:JSON.stringify({url:sheetUrl.trim()})
-     });
-     const data=await r.json();
-     if(!r.ok)throw new Error(data?.error||"Unable to fetch TRADES sheet.");
-
-     const rows=data.rows as Record<string,unknown>[];
-     const active=rows.filter(r=>
-       String(r["Trade Status"]??r["Status"]??"").toLowerCase().includes("active") &&
-       Number(r["Current Holding"]??r["Current Holding "]??0)>0
-     );
-
-     const mapped:Position[]=active.map(r=>{
-       const ticker=canonical(String(r["Trade Name"]??r["Ticker"]??r["Symbol"]??""));
-       const qty=Number(r["Current Holding"]??r["Current Holding "]??0);
-       const invested=Number(r["Current Alocation"]??r["Current Allocation"]??0);
-       const value=Number(r["Currnt Value"]??r["Current Value"]??0);
-       const cmp=Number(r["Currnt Price"]??r["Current Price"]??0)||null;
-       const avg=qty?invested/qty:0;
-       const running=value-invested;
-
-       return {
-         ticker,
-         strategy:"7Bar Swing",
-         qty,
-         avgBuy:avg,
-         invested,
-         avgSell:null,
-         booked:0,
-         cmp,
-         value,
-         running,
-         runningPct:invested?running/invested*100:null
-       };
-     });
-
-     if(!mapped.length){
-       throw new Error("Sheet fetched, but no Active rows with Current Holding > 0 were found.");
-     }
-
-     setPositions(mapped);
-     setCash(startingCapital-mapped.reduce((a,p)=>a+p.invested,0));
-
-     const synced=new Date().toLocaleString("en-IN");
-     setLastSync(synced);
-     setSheetOpen(false);
-     setNotice(`TRADES synced: ${mapped.length} active positions.`);
-   }catch(e){
-     setNotice(e instanceof Error?e.message:"TRADES sync failed");
-   }finally{
-     setSyncing(false);
-   }
- }
-
- function addTx(tx:Tx){
-   const key=canonical(tx.ticker);
-   const next=[...positions];
-   const idx=next.findIndex(p=>canonical(p.ticker)===key);
-
-   if(tx.action==="BUY"){
-     if(idx<0){
-       next.push({
-         ticker:key,
-         strategy:tx.strategy,
-         qty:tx.qty,
-         avgBuy:tx.price,
-         invested:tx.qty*tx.price,
-         avgSell:null,
-         booked:0,
-         cmp:null,
-         value:null,
-         running:null,
-         runningPct:null
-       });
-     }else{
-       const p=next[idx];
-       const inv=p.invested+tx.qty*tx.price;
-       const q=p.qty+tx.qty;
-       next[idx]={...p,qty:q,invested:inv,avgBuy:inv/q,strategy:tx.strategy};
-     }
-     setCash(c=>c-tx.qty*tx.price);
-   }else{
-     if(idx<0)return;
-
-     const p=next[idx];
-     const q=Math.min(tx.qty,p.qty);
-     const realized=q*(tx.price-p.avgBuy);
-     const left=p.qty-q;
-     const invLeft=Math.max(0,p.invested-p.avgBuy*q);
-
-     setCash(c=>c+q*tx.price);
-
-     if(left<=0){
-       next.splice(idx,1);
-     }else{
-       const nextValue=p.cmp==null?null:left*p.cmp;
-       const nextRunning=nextValue==null?null:nextValue-invLeft;
-
-       next[idx]={
-         ...p,
-         qty:left,
-         invested:invLeft,
-         booked:p.booked+realized,
-         avgSell:tx.price,
-         value:nextValue,
-         running:nextRunning,
-         runningPct:invLeft&&nextRunning!=null?nextRunning/invLeft*100:null
-       };
-     }
-   }
-
-   setPositions(next);
-   setTxs(t=>[...t,tx]);
-   setModal(false);
-   setNotice(`${tx.action} recorded for ${key}`);
- }
-
+ const positions=useMemo(()=>applyManual(trades.positions,manual),[trades.positions,manual]);
  const invested=positions.reduce((a,p)=>a+p.invested,0);
- const value=positions.reduce((a,p)=>a+(p.value??0),0);
+ const value=positions.reduce((a,p)=>a+(p.currentValue??0),0);
  const running=value-invested;
- const actualBooked=sourceSnapshot.netProfit;
+ const runningPct=invested?running/invested*100:0;
+ const actualBooked=trades.booked+manualRealized(trades.positions,manual);
+ const cash=CAPITAL+actualBooked-invested;
  const equity=cash+value;
+ const sevenBooked=seven.bookedPct??0; const sevenRunning=seven.runningPct??0;
+ const sevenBookedValue=CAPITAL*sevenBooked/100; const sevenRunningValue=CAPITAL*sevenRunning/100;
+ const bookedGapValue=actualBooked-sevenBookedValue; const bookedGapPct=actualBooked/CAPITAL*100-sevenBooked;
+ const runningGapValue=running-sevenRunningValue; const runningGapPct=runningPct-sevenRunning;
+ const activeMap=useMemo(()=>new Map(seven.active.map(t=>[canonical(t.ticker),t])),[seven.active]);
+ const matched=positions.filter(p=>activeMap.has(canonical(p.ticker)));
+ const actualOnly=positions.filter(p=>!activeMap.has(canonical(p.ticker)));
+ const sevenOnly=seven.active.filter(t=>!positions.some(p=>canonical(p.ticker)===canonical(t.ticker)));
+ const missingClosed=seven.closed.filter(t=>!trades.positions.some(p=>canonical(p.ticker)===canonical(t)));
 
- const active7=useMemo(()=>new Set(seven.active),[seven.active]);
- const activeCompare=positions.filter(
-   p=>p.strategy==="7Bar Swing" &&
-   seven.active.length>0 &&
-   active7.has(canonical(p.ticker))
- );
+ function addTransaction(t:Transaction){
+   setManual(m=>[...m,t]);
+   setShowTx(false);setNotice(`${t.action} recorded for ${canonical(t.ticker)}. This session's actual view has been updated.`);
+ }
+ return <div className="app">
+   <header className="topbar"><div><div className="brand">Real Trading Tracker</div><div className="tagline">7Bar model vs your actual execution</div></div><div className="top-actions"><button className="btn ghost" onClick={()=>setShowSettings(true)}>⚙ Sheets</button><button className="btn ghost" onClick={()=>void refreshSeven()} disabled={sevenLoading}>↻ Refresh 7Bar</button><button className="btn primary" onClick={()=>setShowTx(true)}>＋ Add transaction</button></div></header>
+   <div className="notice">{notice}<span className="source-state">7Bar: {seven.syncedAt?new Date(seven.syncedAt).toLocaleTimeString():"—"} · TRADES: {trades.syncedAt?new Date(trades.syncedAt).toLocaleTimeString():"—"}</span></div>
 
- return (
-  <main className="shell">
-   <header className="top">
-    <div className="brand">
-     <div className="logo">RT</div>
-     <div>
-      <div className="title">Real Trading Tracker</div>
-      <div className="muted">7Bar vs your actual trading</div>
-     </div>
-    </div>
+   <main>
+    <div className="hero"><div><div className="eyebrow">PERSONAL PERFORMANCE DASHBOARD</div><h1>7Bar vs My Actual Result</h1><p>Model performance compared with what your TRADES sheet says you actually hold and have booked.</p></div></div>
 
-    <div className="actions">
-     <button className="btn" onClick={()=>setSheetOpen(true)}>⚙ TRADES Sheet</button>
-     <button className="btn" onClick={refresh7}>↻ Refresh 7Bar</button>
-     <button className="btn primary" onClick={()=>setModal(true)}>＋ Add transaction</button>
-    </div>
-   </header>
-
-   <div className="notice">
-    {notice}
-    {lastSync&&<span className="small" style={{float:"right"}}>TRADES last sync: {lastSync}</span>}
-   </div>
-
-   <section className="section">
-    <div className="section-head">
-     <div>
-      <div className="section-title">Portfolio overview</div>
-      <div className="muted small">Current state from your TRADES data + manual updates</div>
-     </div>
-    </div>
-
-    <div className="grid4">
-     <div className="card">
-      <div className="kpi-label">Starting capital</div>
-      <div className="kpi">{money(startingCapital)}</div>
-      <div className="sub">Tracking capital</div>
-     </div>
-     <div className="card">
-      <div className="kpi-label">Invested</div>
-      <div className="kpi">{money(invested)}</div>
-      <div className="sub">{positions.length} active positions</div>
-     </div>
-     <div className="card">
-      <div className="kpi-label">Cash available</div>
-      <div className="kpi">{money(cash)}</div>
-      <div className="sub">Available to deploy</div>
-     </div>
-     <div className="card">
-      <div className="kpi-label">Total equity</div>
-      <div className="kpi">{money(equity)}</div>
-      <div className={`sub ${cls(running)}`}>{money(running)} running vs cost</div>
-     </div>
-    </div>
-   </section>
-
-   <section className="section">
-    <div className="section-title">7Bar vs My Actual</div>
-
-    <div className="grid2">
-     <div className="card">
-      <div className="kpi-label">Booked performance</div>
-      <div className={`hero-num ${cls(seven.booked)}`}>{pct(seven.booked)}</div>
-      <div className={`sub ${cls(seven.booked)}`}>{money(seven.booked/100*startingCapital)} model result</div>
-
-      <div className="compare-row"><span>7Bar Model</span><b className={cls(seven.booked)}>{pct(seven.booked)}</b></div>
-      <div className="compare-row"><span>My Actual</span><b className={cls(actualBooked)}>{money(actualBooked)}</b></div>
-      <div className="compare-row"><span>Gap</span><b className={cls(actualBooked-seven.booked/100*startingCapital)}>{money(actualBooked-seven.booked/100*startingCapital)}</b></div>
-     </div>
-
-     <div className="card">
-      <div className="kpi-label">Running performance</div>
-      <div className={`hero-num ${cls(running)}`}>{pct(invested?running/invested*100:0)}</div>
-      <div className={`sub ${cls(running)}`}>{money(running)} on current holdings</div>
-
-      <div className="compare-row"><span>7Bar Running</span><b className={cls(seven.running)}>{pct(seven.running)}</b></div>
-      <div className="compare-row"><span>My Running</span><b className={cls(running)}>{pct(invested?running/invested*100:0)}</b></div>
-      <div className="compare-row"><span>Difference</span><b>{pct((invested?running/invested*100:0)-seven.running)}</b></div>
-     </div>
-    </div>
-   </section>
-
-   <section className="section">
-    <div className="section-head">
-     <div>
-      <div className="section-title">Active positions</div>
-      <div className="muted small">Only positions you currently hold</div>
-     </div>
-     <span className="pill active">{positions.length} active</span>
-    </div>
-
-    <div className="table-wrap">
-     <table className="table">
-      <thead><tr><th>Stock</th><th>Strategy</th><th>Qty</th><th>Avg buy</th><th>CMP</th><th>Invested</th><th>Value</th><th>Running P&L</th><th></th></tr></thead>
-      <tbody>
-       {positions.map(p=>
-        <tr key={p.ticker} onClick={()=>setSelected(p)} style={{cursor:"pointer"}}>
-         <td className="stock">{p.ticker}</td>
-         <td><span className="pill active">{p.strategy}</span></td>
-         <td>{p.qty}</td>
-         <td>{money(p.avgBuy)}</td>
-         <td>{money(p.cmp)}</td>
-         <td>{money(p.invested)}</td>
-         <td>{money(p.value)}</td>
-         <td className={cls(p.running)}>{money(p.running)} <span className="small">({pct(p.runningPct)})</span></td>
-         <td>›</td>
-        </tr>
-       )}
-      </tbody>
-     </table>
-    </div>
-   </section>
-
-   <section className="section">
-    <div className="section-head">
-     <div>
-      <div className="section-title">7Bar active match</div>
-      <div className="muted small">Your current holdings that also appear as ACTIVE in 7Bar</div>
-     </div>
-    </div>
-
-    <div className="table-wrap">
-     <table className="table">
-      <thead><tr><th>Stock</th><th>Your qty</th><th>Your running</th><th>7Bar</th><th>Status</th></tr></thead>
-      <tbody>
-       {activeCompare.length?
-        activeCompare.map(p=>
-         <tr key={p.ticker}>
-          <td className="stock">{p.ticker}</td>
-          <td>{p.qty}</td>
-          <td className={cls(p.running)}>{money(p.running)} ({pct(p.runningPct)})</td>
-          <td><span className="pill active">ACTIVE</span></td>
-          <td><span className="pill active">Matched</span></td>
-         </tr>
-        ):
-        <tr><td colSpan={5} className="empty">Refresh 7Bar to populate the live active-match list.</td></tr>
-       }
-      </tbody>
-     </table>
-    </div>
-   </section>
-
-   <section className="section">
-    <div className="section-head">
-     <div>
-      <div className="section-title">Recent transactions</div>
-      <div className="muted small">Manual BUY / SELL activity in this browser</div>
-     </div>
-    </div>
-
-    <div className="table-wrap">
-     <table className="table">
-      <thead><tr><th>Date</th><th>Stock</th><th>Action</th><th>Qty</th><th>Price</th><th>Strategy</th></tr></thead>
-      <tbody>
-       {txs.slice().reverse().map(t=>
-        <tr key={t.id}>
-         <td>{t.date}</td>
-         <td className="stock">{t.ticker}</td>
-         <td><span className={`pill ${t.action==="BUY"?"active":"closed"}`}>{t.action}</span></td>
-         <td>{t.qty}</td>
-         <td>{money(t.price)}</td>
-         <td>{t.strategy}</td>
-        </tr>
-       )}
-       {!txs.length&&<tr><td colSpan={6} className="empty">No manual transactions yet. Use “Add transaction”.</td></tr>}
-      </tbody>
-     </table>
-    </div>
-   </section>
-
-   {sheetOpen&&
-    <SheetModal
-     url={sheetUrl}
-     setUrl={setSheetUrl}
-     onClose={()=>setSheetOpen(false)}
-     onFetch={fetchTradesSheet}
-     loading={syncing}
-    />
-   }
-
-   {modal&&<TxModal onClose={()=>setModal(false)} onSave={addTx}/>}
-
-   {selected&&
-    <div className="modal-bg" onClick={()=>setSelected(null)}>
-     <div className="modal" onClick={e=>e.stopPropagation()}>
-      <div className="section-title">{selected.ticker}</div>
-      <div className="muted">Current position</div>
-
-      <div className="grid2">
-       <div className="card"><div className="kpi-label">Holding</div><div className="kpi">{selected.qty}</div></div>
-       <div className="card"><div className="kpi-label">Invested</div><div className="kpi">{money(selected.invested)}</div></div>
-       <div className="card"><div className="kpi-label">Avg buy</div><div className="kpi">{money(selected.avgBuy)}</div></div>
-       <div className="card"><div className="kpi-label">Running</div><div className={`kpi ${cls(selected.running)}`}>{money(selected.running)}</div></div>
+    <Section title="Portfolio at a glance" desc="All figures below exclude broker charges until V2/V4 broker integration.">
+      <div className="grid4">
+       <Card label="Starting capital" value={money(CAPITAL)} sub="Tracking capital"/>
+       <Card label="Currently invested" value={money(invested)} sub={`${positions.length} current holding${positions.length===1?"":"s"}`}/>
+       <Card label="Cash available" value={<span className="good">{money(cash)}</span>} sub="Capital + booked − current cost"/>
+       <Card label="Total equity" value={<span className={tone(equity-CAPITAL)}>{money(equity)}</span>} sub={`Cash + current portfolio value · ${money(equity-CAPITAL)} total P&L`}/>
       </div>
+    </Section>
 
-      <div className="modal-actions">
-       <button className="btn" onClick={()=>setSelected(null)}>Close</button>
-       <button className="btn primary" onClick={()=>{setSelected(null);setModal(true)}}>＋ Transaction</button>
+    <div className="compare-grid">
+      <Performance title="BOOKED PERFORMANCE" modelPct={sevenBooked} modelValue={sevenBookedValue} actualPct={actualBooked/CAPITAL*100} actualValue={actualBooked} gapPct={bookedGapPct} gapValue={bookedGapValue} modelLabel="7Bar Booked" actualLabel="My Booked"/>
+      <Performance title="RUNNING PERFORMANCE" modelPct={sevenRunning} modelValue={sevenRunningValue} actualPct={runningPct} actualValue={running} gapPct={runningGapPct} gapValue={runningGapValue} modelLabel="7Bar Running" actualLabel="My Running"/>
+    </div>
+
+    <Section title="What the numbers mean" desc="The model percentage comes directly from the 7Bar summary. Actual running is calculated only from current holdings in TRADES.">
+      <div className="explain-grid">
+       <div className="explain"><span>7Bar booked</span><strong className={tone(sevenBooked)}>{pct(sevenBooked)}</strong><small>{money(sevenBookedValue)} on ₹3L model capital</small></div>
+       <div className="explain"><span>My booked</span><strong className={tone(actualBooked)}>{pct(actualBooked/CAPITAL*100)}</strong><small>{money(actualBooked)} realized result</small></div>
+       <div className="explain"><span>7Bar running</span><strong className={tone(sevenRunning)}>{pct(sevenRunning)}</strong><small>{money(sevenRunningValue)} on ₹3L model capital</small></div>
+       <div className="explain"><span>My running</span><strong className={tone(running)}>{pct(runningPct)}</strong><small>{money(running)} on ₹{Math.round(invested).toLocaleString("en-IN")} invested</small></div>
       </div>
-     </div>
-    </div>
-   }
-  </main>
- );}
+    </Section>
 
-function SheetModal({url,setUrl,onClose,onFetch,loading}:{url:string;setUrl:(v:string)=>void;onClose:()=>void;onFetch:()=>void;loading:boolean}){
- return (
-  <div className="modal-bg">
-   <div className="modal">
-    <div className="section-title">Connect TRADES Google Sheet</div>
-    <div className="muted" style={{marginTop:5}}>
-     Paste a public/view-only Google Sheets link. You can return here and fetch the latest data whenever the sheet changes.
-    </div>
+    <Section title="Active trades" desc="A match exists only when the stock is ACTIVE in 7Bar and you currently hold it in TRADES." action={<span className="count-pill">{matched.length} matched</span>}>
+      {matched.length===0?<Empty text="No active 7Bar / actual matches yet."/>:<div className="table-wrap"><table><thead><tr><th>Stock</th><th>7Bar PF</th><th>Your qty</th><th>Your invested</th><th>Your value</th><th>Your running</th><th>Difference</th><th></th></tr></thead><tbody>{matched.map(p=>{const b=activeMap.get(canonical(p.ticker));const d=(p.runningPct??0)-(b?.runningPct??0);return <tr key={p.ticker} onClick={()=>setSelected(p)}><td className="stock">{p.ticker}</td><td className={tone(b?.runningPct)}>{pct(b?.runningPct)}</td><td>{p.qty}</td><td>{money(p.invested)}</td><td>{money(p.currentValue)}</td><td className={tone(p.running)}>{money(p.running)} <small>({pct(p.runningPct)})</small></td><td className={tone(d)}>{signedPp(d)}</td><td>›</td></tr>})}</tbody></table></div>}
+    </Section>
 
-    <div className="field" style={{marginTop:16}}>
-     <label>Google Sheet URL</label>
-     <input
-      value={url}
-      onChange={e=>setUrl(e.target.value)}
-      placeholder="https://docs.google.com/spreadsheets/d/..."
-     />
+    <div className="two-col">
+      <Section title="7Bar active not in my holdings" desc="These are currently ACTIVE in 7Bar but absent from your current TRADES holdings.">
+       {sevenOnly.length===0?<div className="success-box">✓ All active 7Bar trades are represented in your holdings.</div>:<div className="stack">{sevenOnly.map(t=><div className="alert-row" key={t.ticker}><div><strong>{t.ticker}</strong><span>7Bar running {pct(t.runningPct)}</span></div><b>{pct(t.runningPct)}</b></div>)}</div>}
+      </Section>
+      <Section title="Trades not currently ACTIVE in 7Bar" desc="Useful for spotting personal trades or stale 7Bar positions.">
+       {actualOnly.length===0?<div className="success-box">✓ Every current holding matches an ACTIVE 7Bar trade.</div>:<div className="stack">{actualOnly.map(p=><div className="neutral-row" key={p.ticker}><div><strong>{p.ticker}</strong><span>{p.qty} shares · {money(p.invested)} invested</span></div><b className={tone(p.running)}>{pct(p.runningPct)}</b></div>)}</div>}
+      </Section>
     </div>
 
-    <div className="notice" style={{marginTop:12}}>
-     The sheet must be accessible without signing in. Use “Anyone with the link → Viewer” or publish the sheet publicly.
-    </div>
+    <Section title="Missing closed 7Bar trades" desc="Closed model trades that cannot be found anywhere in your TRADES sheet after ticker-name normalization.">
+      {missingClosed.length===0?<div className="success-box">✓ No missing closed 7Bar trades detected.</div>:<div className="chips">{missingClosed.map(t=><span key={t} className="chip">⚠{t}</span>)}</div>}
+    </Section>
+   </main>
 
-    <div className="modal-actions">
-     <button className="btn" onClick={onClose}>Cancel</button>
-     <button className="btn primary" disabled={loading||!url.trim()} onClick={onFetch}>
-      {loading?"Syncing…":"Fetch latest TRADES"}
-     </button>
-    </div>
-   </div>
-  </div>
- );
+   {showSettings&&<div className="modal-bg" onClick={()=>setShowSettings(false)}><div className="modal" onClick={(e:any)=>e.stopPropagation()}><div className="modal-head"><div><h2>Sheet sources</h2><p>Both sheets are fetched server-side, so the Google Sheet does not need browser CORS access.</p></div><button className="icon-btn" onClick={()=>setShowSettings(false)}>×</button></div><label>TRADES Google Sheet URL</label><input value={tradesUrl} onChange={(e:any)=>setTradesUrl(e.target.value)} /><div className="hint">7Bar is fixed to the public model sheet. No environment variable is required.</div><div className="modal-actions"><button className="btn ghost" onClick={()=>setShowSettings(false)}>Cancel</button><button className="btn primary" disabled={tradesLoading} onClick={()=>{setShowSettings(false);void refreshTrades(tradesUrl)}}>↻ Fetch TRADES</button></div></div></div>}
+   {showTx&&<TxModal onClose={()=>setShowTx(false)} onSave={addTransaction} positions={positions}/>} 
+   {selected&&<div className="modal-bg" onClick={()=>setSelected(null)}><div className="modal" onClick={(e:any)=>e.stopPropagation()}><div className="modal-head"><div><div className="eyebrow">CURRENT HOLDING</div><h2>{selected.ticker}</h2></div><button className="icon-btn" onClick={()=>setSelected(null)}>×</button></div><div className="grid2"><Card label="Quantity" value={selected.qty}/><Card label="Invested" value={money(selected.invested)}/><Card label="CMP" value={money(selected.currentPrice)}/><Card label="Running" value={<span className={tone(selected.running)}>{money(selected.running)}</span>} sub={pct(selected.runningPct)}/></div><div className="modal-actions"><button className="btn ghost" onClick={()=>setSelected(null)}>Close</button><button className="btn primary" onClick={()=>{setSelected(null);setShowTx(true)}}>＋ Transaction</button></div></div></div>}
+ </div>
 }
 
-function TxModal({onClose,onSave}:{onClose:()=>void;onSave:(t:Tx)=>void}){
- const [ticker,setTicker]=useState("");
- const [action,setAction]=useState<"BUY"|"SELL">("BUY");
- const [qty,setQty]=useState("");
- const [price,setPrice]=useState("");
- const [strategy,setStrategy]=useState<Strategy>("7Bar Swing");
- const [date,setDate]=useState(new Date().toISOString().slice(0,10));
+function Performance({title,modelPct,modelValue,actualPct,actualValue,gapPct,gapValue,modelLabel,actualLabel}:{title:string;modelPct:number;modelValue:number;actualPct:number;actualValue:number;gapPct:number;gapValue:number;modelLabel:string;actualLabel:string}){return <section className="perf-card"><div className="eyebrow">{title}</div><div className={`hero-value ${tone(gapPct)}`}>{pct(actualPct)}</div><div className={`hero-money ${tone(actualValue)}`}>{money(actualValue)} <span>actual</span></div><div className="compare-lines"><div><span>{modelLabel}</span><b className={tone(modelPct)}>{pct(modelPct)} <em>{money(modelValue)}</em></b></div><div><span>{actualLabel}</span><b className={tone(actualPct)}>{pct(actualPct)} <em>{money(actualValue)}</em></b></div><div className="gap"><span>Difference</span><b className={tone(gapPct)}>{signedPp(gapPct)} <em>{money(gapValue)}</em></b></div></div></section>}
 
- return (
-  <div className="modal-bg">
-   <div className="modal">
-    <div className="section-title">Add transaction</div>
-    <div className="muted">One BUY or SELL. The position recalculates automatically.</div>
+function TxModal({onClose,onSave,positions}:{onClose:()=>void;onSave:(t:Transaction)=>void;positions:Position[]}){const [ticker,setTicker]=useState("");const [action,setAction]=useState<"BUY"|"SELL">("BUY");const [qty,setQty]=useState("");const [price,setPrice]=useState("");const [strategy,setStrategy]=useState("7Bar Swing");const [date,setDate]=useState(new Date().toISOString().slice(0,10));const current=positions.find(p=>canonical(p.ticker)===canonical(ticker));return <div className="modal-bg"><div className="modal"><div className="modal-head"><div><div className="eyebrow">MANUAL UPDATE</div><h2>{action} transaction</h2><p>Updates the current session immediately. Refreshing TRADES reloads the sheet as the source of truth.</p></div><button className="icon-btn" onClick={onClose}>×</button></div><div className="form-grid"><label>Stock<input value={ticker} onChange={(e:any)=>setTicker(e.target.value.toUpperCase())} placeholder="LAURUSLABS"/></label><label>Action<select value={action} onChange={(e:any)=>setAction(e.target.value as "BUY"|"SELL")}><option>BUY</option><option>SELL</option></select></label><label>Quantity<input type="number" min="0" value={qty} onChange={(e:any)=>setQty(e.target.value)}/></label><label>Price<input type="number" min="0" step="0.01" value={price} onChange={(e:any)=>setPrice(e.target.value)}/></label><label>Date<input type="date" value={date} onChange={(e:any)=>setDate(e.target.value)}/></label><label>Strategy<select value={strategy} onChange={(e:any)=>setStrategy(e.target.value)}><option>7Bar Swing</option><option>Long Term</option><option>Personal Pick</option><option>Other</option></select></label></div>{current&&<div className="form-note">Current holding: <b>{current.qty}</b> · invested {money(current.invested)}</div>}{action==="SELL"&&current&&Number(qty)>current.qty&&<div className="error-box">Sell quantity cannot exceed the current holding.</div>}<div className="modal-actions"><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!ticker||Number(qty)<=0||Number(price)<=0||(action==="SELL"&&(!current||Number(qty)>current.qty))} onClick={()=>onSave({id:crypto.randomUUID(),ticker:canonical(ticker),action,qty:Number(qty),price:Number(price),date,strategy})}>{action} & Save</button></div></div></div>}
 
-    <div className="formgrid" style={{marginTop:16}}>
-     <div className="field"><label>Stock</label><input value={ticker} onChange={e=>setTicker(e.target.value)} placeholder="LAURUSLABS"/></div>
-     <div className="field"><label>Action</label><select value={action} onChange={e=>setAction(e.target.value as "BUY"|"SELL")}><option>BUY</option><option>SELL</option></select></div>
-     <div className="field"><label>Quantity</label><input type="number" value={qty} onChange={e=>setQty(e.target.value)}/></div>
-     <div className="field"><label>Price</label><input type="number" value={price} onChange={e=>setPrice(e.target.value)}/></div>
-     <div className="field"><label>Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
-     <div className="field"><label>Strategy</label><select value={strategy} onChange={e=>setStrategy(e.target.value as Strategy)}><option>7Bar Swing</option><option>Long Term</option><option>Personal Pick</option><option>Other</option></select></div>
-    </div>
-
-    <div className="modal-actions">
-     <button className="btn" onClick={onClose}>Cancel</button>
-     <button className="btn primary" disabled={!ticker||!qty||!price} onClick={()=>onSave({id:crypto.randomUUID(),ticker:canonical(ticker),action,qty:Number(qty),price:Number(price),date,strategy})}>Save transaction</button>
-    </div>
-   </div>
-  </div>
- );
-}
+function manualRealized(base:Position[],txs:Transaction[]){const map=new Map(base.map(p=>[canonical(p.ticker),{qty:p.qty,avg:p.avgBuy}]));let realized=0;for(const t of txs){const k=canonical(t.ticker),p=map.get(k);if(t.action==="BUY"){if(p){const total=p.qty*p.avg+t.qty*t.price;p.qty+=t.qty;p.avg=total/p.qty}else map.set(k,{qty:t.qty,avg:t.price})}else if(p){const q=Math.min(t.qty,p.qty);realized+=q*(t.price-p.avg);p.qty-=q;if(p.qty<=0)map.delete(k)}}return realized}
+function applyManual(base:Position[],txs:Transaction[]){const map=new Map(base.map(p=>[canonical(p.ticker),{...p}]));for(const t of txs){const k=canonical(t.ticker),p=map.get(k);if(t.action==="BUY"){if(p){const total=p.invested+t.qty*t.price;const q=p.qty+t.qty;map.set(k,{...p,qty:q,invested:total,avgBuy:total/q,currentValue:p.currentPrice==null?null:q*p.currentPrice,running:p.currentPrice==null?null:q*p.currentPrice-total,runningPct:p.currentPrice==null?null:(q*p.currentPrice-total)/total*100})}else map.set(k,{ticker:k,qty:t.qty,avgBuy:t.price,invested:t.qty*t.price,currentPrice:null,currentValue:null,running:null,runningPct:null,status:"Active",strategy:t.strategy})}else if(p){const q=Math.min(t.qty,p.qty),left=p.qty-q,invLeft=Math.max(0,p.invested-p.avgBuy*q);if(left<=0)map.delete(k);else map.set(k,{...p,qty:left,invested:invLeft,currentValue:p.currentPrice==null?null:left*p.currentPrice,running:p.currentPrice==null?null:left*p.currentPrice-invLeft,runningPct:p.currentPrice==null?null:(left*p.currentPrice-invLeft)/invLeft*100})}}return [...map.values()].filter(p=>p.qty>0)}
+function Empty({text}:{text:string}){return <div className="empty">•{text}</div>}
